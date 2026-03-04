@@ -49,6 +49,20 @@ export default function TickerPage({
 
   const { ticker, latest_signal, latest_indicators } = tickerData;
 
+  // Get latest price from OHLCV data
+  const latestBar = ohlcvData?.bars?.length
+    ? ohlcvData.bars[ohlcvData.bars.length - 1]
+    : null;
+  const prevBar = ohlcvData?.bars?.length && ohlcvData.bars.length > 1
+    ? ohlcvData.bars[ohlcvData.bars.length - 2]
+    : null;
+  const priceChange = latestBar && prevBar
+    ? latestBar.close - prevBar.close
+    : null;
+  const priceChangePct = priceChange && prevBar
+    ? (priceChange / prevBar.close) * 100
+    : null;
+
   return (
     <div>
       <Link
@@ -61,10 +75,33 @@ export default function TickerPage({
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white">{ticker.symbol}</h1>
+        <div className="flex items-baseline gap-4">
+          <h1 className="text-3xl font-bold text-white">{ticker.symbol}</h1>
+          {latestBar && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-semibold text-white">
+                ${latestBar.close.toFixed(2)}
+              </span>
+              {priceChange !== null && priceChangePct !== null && (
+                <span
+                  className={`text-sm font-medium ${
+                    priceChange >= 0 ? "text-emerald-400" : "text-red-400"
+                  }`}
+                >
+                  {priceChange >= 0 ? "+" : ""}
+                  {priceChange.toFixed(2)} ({priceChangePct >= 0 ? "+" : ""}
+                  {priceChangePct.toFixed(2)}%)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         <p className="text-gray-400">
           {ticker.name} &middot; {ticker.exchange} &middot; {ticker.country}
         </p>
+        {ticker.sic_description && (
+          <p className="text-sm text-gray-500">{ticker.sic_description}</p>
+        )}
       </div>
 
       {/* Chart */}
@@ -83,6 +120,14 @@ export default function TickerPage({
           </p>
         )}
       </div>
+
+      {/* Company Description */}
+      {ticker.description && (
+        <div className="mb-6 rounded-lg border border-gray-800 bg-gray-900 p-4">
+          <h2 className="mb-2 text-lg font-semibold text-white">About {ticker.name}</h2>
+          <p className="text-sm leading-relaxed text-gray-300">{ticker.description}</p>
+        </div>
+      )}
 
       {/* Main content grid */}
       <div className="grid gap-6 lg:grid-cols-2">

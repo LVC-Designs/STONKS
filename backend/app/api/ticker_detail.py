@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,9 @@ from app.services.ohlcv_service import get_ohlcv_bars
 from app.services.indicator_service import get_indicators_for_ticker
 from app.services.signal_service import get_signals_for_ticker
 from app.services.news_service import get_news_for_ticker
+from app.adapters.polygon_adapter import PolygonAdapter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -18,6 +22,20 @@ async def get_ticker(symbol: str, db: AsyncSession = Depends(get_db)):
     ticker = await get_ticker_by_symbol(db, symbol.upper())
     if not ticker:
         raise HTTPException(status_code=404, detail=f"Ticker {symbol} not found")
+
+    # Lazy-fetch description from Polygon if missing
+    if ticker.description is None:
+        try:
+            adapter = PolygonAdapter()
+            details = await adapter.get_ticker_details(ticker.symbol)
+            await adapter.close()
+            if details and details.get("description"):
+                ticker.description = details["description"]
+                ticker.sic_code = details.get("sic_code")
+                ticker.sic_description = details.get("sic_description")
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"Could not fetch details for {symbol}: {e}")
 
     signals = await get_signals_for_ticker(db, ticker.id, limit=1)
     indicators = await get_indicators_for_ticker(db, ticker.id, limit=1)

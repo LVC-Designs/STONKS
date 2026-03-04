@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey, UniqueConstraint, Index, Text
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -19,6 +19,9 @@ class Ticker(Base):
     active = Column(Boolean, default=True)
     polygon_ticker = Column(String(30))
     finnhub_ticker = Column(String(30))
+    description = Column(Text)
+    sic_code = Column(String(10))
+    sic_description = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

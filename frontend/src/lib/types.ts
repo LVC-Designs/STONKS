@@ -134,6 +134,9 @@ export interface TickerDetail {
     country: string;
     currency: string;
     active: boolean;
+    description: string | null;
+    sic_code: string | null;
+    sic_description: string | null;
   };
   latest_signal: SignalDetail | null;
   latest_indicators: IndicatorSet | null;

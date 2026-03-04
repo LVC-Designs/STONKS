@@ -4,6 +4,7 @@ from app.adapters.polygon_adapter import PolygonAdapter
 from app.adapters.yahoo_adapter import YahooAdapter
 from app.adapters.alphavantage_adapter import AlphaVantageAdapter
 from app.adapters.finnhub_news_adapter import FinnhubNewsAdapter
+from app.adapters.polygon_news_adapter import PolygonNewsAdapter
 from app.adapters.yahoo_news_adapter import YahooNewsAdapter
 from app.adapters.newsapi_adapter import NewsAPIAdapter
 
@@ -15,6 +16,7 @@ _market_adapters: dict[str, type[BaseMarketAdapter]] = {
 
 _news_adapters: dict[str, type[BaseNewsAdapter]] = {
     "finnhub": FinnhubNewsAdapter,
+    "polygon_news": PolygonNewsAdapter,
     "yahoo_news": YahooNewsAdapter,
     "newsapi": NewsAPIAdapter,
 }

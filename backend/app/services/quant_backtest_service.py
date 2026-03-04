@@ -871,12 +871,14 @@ async def _run_quant_backtest(qb_id: int):
                 all_train_signals = []
 
                 for fold in folds:
-                    signals, _, diag = _generate_signals_for_range(
+                    signals, _, diag = await asyncio.to_thread(
+                        _generate_signals_for_range,
                         ohlcv_dfs, ticker_map,
                         fold["date_from_train"], fold["date_to_train"],
                         ms, tp, td, mdd,
                     )
-                    fold_metrics = _compute_extended_metrics(
+                    fold_metrics = await asyncio.to_thread(
+                        _compute_extended_metrics,
                         signals, ohlcv_dfs, portfolio_cfg, tp, td, mdd,
                         fold["date_from_train"], fold["date_to_train"],
                     )
@@ -920,12 +922,14 @@ async def _run_quant_backtest(qb_id: int):
 
                 fold_val_list = []
                 for fold in folds:
-                    signals, _, diag = _generate_signals_for_range(
+                    signals, _, diag = await asyncio.to_thread(
+                        _generate_signals_for_range,
                         ohlcv_dfs, ticker_map,
                         fold["date_from_val"], fold["date_to_val"],
                         ms, tp, td, mdd,
                     )
-                    fold_metrics = _compute_extended_metrics(
+                    fold_metrics = await asyncio.to_thread(
+                        _compute_extended_metrics,
                         signals, ohlcv_dfs, portfolio_cfg, tp, td, mdd,
                         fold["date_from_val"], fold["date_to_val"],
                     )
@@ -969,12 +973,14 @@ async def _run_quant_backtest(qb_id: int):
             fold_oos_list = []
             oos_equity = []
             for fold in folds:
-                signals, _, diag = _generate_signals_for_range(
+                signals, _, diag = await asyncio.to_thread(
+                    _generate_signals_for_range,
                     ohlcv_dfs, ticker_map,
                     fold["date_from_oos"], fold["date_to_oos"],
                     ms, tp, td, mdd,
                 )
-                fold_metrics = _compute_extended_metrics(
+                fold_metrics = await asyncio.to_thread(
+                    _compute_extended_metrics,
                     signals, ohlcv_dfs, portfolio_cfg, tp, td, mdd,
                     fold["date_from_oos"], fold["date_to_oos"],
                 )

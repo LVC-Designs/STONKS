@@ -160,6 +160,29 @@ class PolygonAdapter(BaseMarketAdapter):
         logger.info(f"Fetched {len(bars)} bars for {ticker}")
         return bars
 
+    async def get_ticker_details(self, ticker: str) -> dict | None:
+        """Fetch ticker details (description, SIC code, etc.) from Polygon."""
+        if not self.api_key:
+            return None
+
+        url = f"{self.BASE_URL}/v3/reference/tickers/{ticker}"
+        params = {"apiKey": self.api_key}
+
+        try:
+            await self.rate_limiter.acquire()
+            resp = await self.client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            result = data.get("results", {})
+            return {
+                "description": result.get("description"),
+                "sic_code": result.get("sic_code"),
+                "sic_description": result.get("sic_description"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch details for {ticker}: {e}")
+            return None
+
     async def get_corporate_events(
         self, ticker: str, start: date, end: date
     ) -> List[dict]:

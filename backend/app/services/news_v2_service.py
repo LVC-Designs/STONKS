@@ -332,13 +332,30 @@ async def quick_refresh(
             )
             tickers = [row[0] for row in result.all()]
 
-    return await ingest_news(
+    # Ingest from Finnhub (recent, fast)
+    finnhub_result = await ingest_news(
         provider="finnhub",
         mode="incremental",
         tickers=tickers,
         lookback_days=lookback,
         max_articles_per_ticker=max_articles,
     )
+
+    # Also ingest from Polygon (deeper historical coverage, slower due to rate limit)
+    try:
+        polygon_result = await ingest_news(
+            provider="polygon_news",
+            mode="incremental",
+            tickers=tickers[:20],  # Cap for rate limit (5 req/min)
+            lookback_days=max(lookback, 30),
+            max_articles_per_ticker=max_articles,
+            concurrency=2,
+        )
+        finnhub_result["articles_stored"] += polygon_result["articles_stored"]
+    except Exception as e:
+        logger.warning(f"Polygon news ingest skipped: {e}")
+
+    return finnhub_result
 
 
 async def full_ingest_batch(
@@ -380,13 +397,30 @@ async def full_ingest_batch(
     if not tickers:
         return {"tickers_processed": 0, "articles_stored": 0, "errors": []}
 
-    return await ingest_news(
+    # Ingest from Finnhub (recent)
+    finnhub_result = await ingest_news(
         provider="finnhub",
         mode="incremental",
         tickers=tickers,
         lookback_days=lookback,
         max_articles_per_ticker=max_articles,
     )
+
+    # Also ingest from Polygon (historical depth)
+    try:
+        polygon_result = await ingest_news(
+            provider="polygon_news",
+            mode="incremental",
+            tickers=tickers[:20],
+            lookback_days=max(lookback, 30),
+            max_articles_per_ticker=max_articles,
+            concurrency=2,
+        )
+        finnhub_result["articles_stored"] += polygon_result["articles_stored"]
+    except Exception as e:
+        logger.warning(f"Polygon news ingest skipped: {e}")
+
+    return finnhub_result
 
 
 # ---------------------------------------------------------------------------
