@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/__init__.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/ticker.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/ohlcv.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/indicator.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/signal.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/news.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/setting.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/job.py\":*)",
+      "Bash(\"c:/Users/leoch/Documents/STONKS/backend/app/models/backtest.py\":*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "Bash(wc:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(echo:*)",
+      "Bash(node --version:*)",
+      "Bash(npm:*)",
+      "Bash(npx create-next-app:*)",
+      "Bash(npx --yes create-next-app@latest:*)"
+    ]
+  }
+}
