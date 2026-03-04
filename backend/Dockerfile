@@ -8,14 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python deps
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt asyncpg
 
 # Download NLTK data for VADER sentiment
 RUN python -c "import nltk; nltk.download('vader_lexicon', download_dir='/usr/local/nltk_data')"
 
-# Copy app code
-COPY . .
+# Copy backend code
+COPY backend/ .
 
 # Alembic + app need PYTHONPATH
 ENV PYTHONPATH=/app
