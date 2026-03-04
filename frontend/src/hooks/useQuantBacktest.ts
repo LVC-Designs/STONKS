@@ -41,7 +41,9 @@ export function useCreateQuantSweep() {
   const queryClient = useQueryClient();
   return useMutation<QuantBacktest, Error, QuantSweepConfig>({
     mutationFn: async (config: QuantSweepConfig) => {
-      const { data } = await api.post("/backtest/quant", config);
+      const { data } = await api.post("/backtest/quant", config, {
+        timeout: 300_000,
+      });
       return data;
     },
     onSuccess: () => {
