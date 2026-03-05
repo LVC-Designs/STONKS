@@ -224,52 +224,33 @@ def _generate_walk_forward_folds(
 
 
 # ---------------------------------------------------------------------------
-# Signal generation for a date range
+# Pre-computation: compute indicators + scores ONCE per ticker×date
 # ---------------------------------------------------------------------------
 
-def _generate_signals_for_range(
+def _precompute_score_table(
     ohlcv_by_ticker: dict[int, pd.DataFrame],
-    ticker_map: dict[int, object],
     date_from: date,
     date_to: date,
-    min_score: float,
-    target_pct: float,
-    target_days: int,
-    max_dd_pct: float,
     weight_overrides: dict | None = None,
-) -> tuple[list[dict], list[float], dict]:
-    """Generate and evaluate signals for a date range.
+) -> list[dict]:
+    """Pre-compute scores for all ticker×date combos in a date range.
 
-    Returns (signals_data, all_scores, diagnostics).
-    Each signal dict has: ticker_id, signal_date, score, entry_price,
-    target_price, stop_price, outcome, actual_return, days_held, max_drawdown.
+    Returns a list of dicts, each with:
+      ticker_id, signal_date, score, entry_price
+    This is computed ONCE and reused across all parameter combos.
     """
-    signals = []
-    all_scores: list[float] = []
-    diag = {
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
-        "tickers_scored": 0,
-        "dates_scored": 0,
-        "signals_above_threshold": 0,
-        "max_score": None,
-        "min_score": None,
-        "reasons": [],
-    }
+    score_table: list[dict] = []
 
     for ticker_id, ohlcv_df in ohlcv_by_ticker.items():
         if ohlcv_df.empty or len(ohlcv_df) < MIN_BARS_FOR_INDICATORS:
             continue
 
-        # Get trading dates within the requested range
         window_dates = ohlcv_df[
             (ohlcv_df["date"] >= date_from) & (ohlcv_df["date"] <= date_to)
         ]["date"].tolist()
 
         if not window_dates:
             continue
-
-        diag["tickers_scored"] += 1
 
         for td in window_dates:
             df_slice = ohlcv_df[ohlcv_df["date"] <= td].copy()
@@ -284,39 +265,78 @@ def _generate_signals_for_range(
                 continue
 
             result = compute_signal_with_overrides(indicators, df_slice, weight_overrides)
-            all_scores.append(result.score)
-            diag["dates_scored"] += 1
+            entry_price = float(df_slice.iloc[-1]["close"])
+            if not entry_price or entry_price <= 0:
+                continue
 
-            if result.score >= min_score:
-                entry_price = float(df_slice.iloc[-1]["close"])
-                if not entry_price or entry_price <= 0:
-                    continue
+            score_table.append({
+                "ticker_id": ticker_id,
+                "signal_date": td,
+                "score": result.score,
+                "entry_price": round(entry_price, 4),
+            })
 
-                target_price = entry_price * (1 + target_pct / 100)
-                stop_price = entry_price * (1 + max_dd_pct / 100)
+    logger.info(
+        f"Pre-computed {len(score_table)} scores for "
+        f"{date_from} to {date_to}"
+    )
+    return score_table
 
-                # Evaluate outcome using future bars
-                outcome, actual_return, days_held, max_drawdown = _evaluate_signal(
-                    ohlcv_df, td, entry_price, target_pct, target_days, max_dd_pct
-                )
 
-                signals.append({
-                    "ticker_id": ticker_id,
-                    "signal_date": td,
-                    "score": result.score,
-                    "entry_price": round(entry_price, 4),
-                    "target_price": round(target_price, 4),
-                    "stop_price": round(stop_price, 4),
-                    "outcome": outcome,
-                    "actual_return": actual_return,
-                    "days_held": days_held,
-                    "max_drawdown": max_drawdown,
-                })
-                diag["signals_above_threshold"] += 1
+def _apply_combo_to_score_table(
+    score_table: list[dict],
+    ohlcv_by_ticker: dict[int, pd.DataFrame],
+    min_score: float,
+    target_pct: float,
+    target_days: int,
+    max_dd_pct: float,
+) -> tuple[list[dict], list[float], dict]:
+    """Apply a parameter combo to a pre-computed score table.
 
-    if all_scores:
-        diag["max_score"] = round(max(all_scores), 2)
-        diag["min_score"] = round(min(all_scores), 2)
+    Filters by min_score, evaluates outcomes. Much faster than recomputing
+    indicators — just lookups and outcome evaluation.
+    """
+    signals = []
+    all_scores = [row["score"] for row in score_table]
+    diag = {
+        "tickers_scored": len(set(r["ticker_id"] for r in score_table)),
+        "dates_scored": len(score_table),
+        "signals_above_threshold": 0,
+        "max_score": round(max(all_scores), 2) if all_scores else None,
+        "min_score": round(min(all_scores), 2) if all_scores else None,
+        "reasons": [],
+    }
+
+    for row in score_table:
+        if row["score"] < min_score:
+            continue
+
+        entry_price = row["entry_price"]
+        target_price = entry_price * (1 + target_pct / 100)
+        stop_price = entry_price * (1 + max_dd_pct / 100)
+
+        ohlcv_df = ohlcv_by_ticker.get(row["ticker_id"])
+        if ohlcv_df is None:
+            continue
+
+        outcome, actual_return, days_held, max_drawdown = _evaluate_signal(
+            ohlcv_df, row["signal_date"], entry_price,
+            target_pct, target_days, max_dd_pct,
+        )
+
+        signals.append({
+            "ticker_id": row["ticker_id"],
+            "signal_date": row["signal_date"],
+            "score": row["score"],
+            "entry_price": entry_price,
+            "target_price": round(target_price, 4),
+            "stop_price": round(stop_price, 4),
+            "outcome": outcome,
+            "actual_return": actual_return,
+            "days_held": days_held,
+            "max_drawdown": max_drawdown,
+        })
+        diag["signals_above_threshold"] += 1
 
     if not all_scores:
         diag["reasons"].append("No indicators could be computed. Check OHLCV coverage.")
@@ -327,6 +347,28 @@ def _generate_signals_for_range(
         )
 
     return signals, all_scores, diag
+
+
+# Keep the old function for non-quant backtests that call it
+def _generate_signals_for_range(
+    ohlcv_by_ticker: dict[int, pd.DataFrame],
+    ticker_map: dict[int, object],
+    date_from: date,
+    date_to: date,
+    min_score: float,
+    target_pct: float,
+    target_days: int,
+    max_dd_pct: float,
+    weight_overrides: dict | None = None,
+) -> tuple[list[dict], list[float], dict]:
+    """Generate and evaluate signals for a date range (legacy, used by non-quant backtests)."""
+    score_table = _precompute_score_table(
+        ohlcv_by_ticker, date_from, date_to, weight_overrides,
+    )
+    return _apply_combo_to_score_table(
+        score_table, ohlcv_by_ticker,
+        min_score, target_pct, target_days, max_dd_pct,
+    )
 
 
 def _evaluate_signal(
@@ -852,11 +894,28 @@ async def _run_quant_backtest(qb_id: int):
             qb.progress = f"Loaded {len(ohlcv_rows)} bars for {len(ohlcv_dfs)} tickers"
             await db.commit()
 
-            # ---- PHASE 1: Run all combos on TRAIN ----
-            qb.progress = "Phase 1/3: Evaluating all combos on TRAIN..."
+            # ---- PRE-COMPUTE: Score tables for each fold's TRAIN window ----
+            qb.progress = "Phase 1/3: Pre-computing indicators (one-time)..."
             await db.commit()
 
-            train_results: list[dict] = []  # {combo, train_metrics, train_objective, fold_train_metrics}
+            # Pre-compute scores ONCE per fold (the expensive part)
+            train_score_tables: list[list[dict]] = []
+            for fi, fold in enumerate(folds):
+                qb.progress = f"Phase 1/3: Computing indicators for fold {fi + 1}/{len(folds)}..."
+                await db.commit()
+                st = await asyncio.to_thread(
+                    _precompute_score_table,
+                    ohlcv_dfs,
+                    fold["date_from_train"], fold["date_to_train"],
+                )
+                train_score_tables.append(st)
+                logger.info(f"Fold {fi}: {len(st)} score entries for TRAIN")
+
+            # ---- PHASE 1: Apply all combos to pre-computed scores (fast) ----
+            qb.progress = f"Phase 1/3: Testing {len(combos)} combos on TRAIN..."
+            await db.commit()
+
+            train_results: list[dict] = []
 
             for ci, (ms, tp, td, mdd) in enumerate(combos):
                 combo_config = {
@@ -866,15 +925,13 @@ async def _run_quant_backtest(qb_id: int):
                     "max_drawdown_pct": mdd,
                 }
 
-                # Aggregate train metrics across all folds
                 fold_train_list = []
                 all_train_signals = []
 
-                for fold in folds:
+                for fi, fold in enumerate(folds):
                     signals, _, diag = await asyncio.to_thread(
-                        _generate_signals_for_range,
-                        ohlcv_dfs, ticker_map,
-                        fold["date_from_train"], fold["date_to_train"],
+                        _apply_combo_to_score_table,
+                        train_score_tables[fi], ohlcv_dfs,
                         ms, tp, td, mdd,
                     )
                     fold_metrics = await asyncio.to_thread(
@@ -885,7 +942,6 @@ async def _run_quant_backtest(qb_id: int):
                     fold_train_list.append(fold_metrics)
                     all_train_signals.extend(signals)
 
-                # Average metrics across folds for ranking
                 if len(fold_train_list) > 1:
                     avg_metrics = _average_metrics(fold_train_list)
                 else:
@@ -910,8 +966,21 @@ async def _run_quant_backtest(qb_id: int):
             qb.progress = f"Phase 1 done. Top {len(top_candidates)} configs selected for validation."
             await db.commit()
 
-            # ---- PHASE 2: Run top K on VALIDATION ----
-            qb.progress = "Phase 2/3: Evaluating top configs on VALIDATION..."
+            # ---- PRE-COMPUTE: Score tables for VALIDATION windows ----
+            qb.progress = "Phase 2/3: Pre-computing indicators for validation..."
+            await db.commit()
+
+            val_score_tables: list[list[dict]] = []
+            for fi, fold in enumerate(folds):
+                st = await asyncio.to_thread(
+                    _precompute_score_table,
+                    ohlcv_dfs,
+                    fold["date_from_val"], fold["date_to_val"],
+                )
+                val_score_tables.append(st)
+
+            # ---- PHASE 2: Apply top K combos to validation scores ----
+            qb.progress = f"Phase 2/3: Testing {len(top_candidates)} configs on VALIDATION..."
             await db.commit()
 
             val_results: list[dict] = []
@@ -921,11 +990,10 @@ async def _run_quant_backtest(qb_id: int):
                 ms, tp, td, mdd = combo["min_score"], combo["target_pct"], combo["target_days"], combo["max_drawdown_pct"]
 
                 fold_val_list = []
-                for fold in folds:
+                for fi, fold in enumerate(folds):
                     signals, _, diag = await asyncio.to_thread(
-                        _generate_signals_for_range,
-                        ohlcv_dfs, ticker_map,
-                        fold["date_from_val"], fold["date_to_val"],
+                        _apply_combo_to_score_table,
+                        val_score_tables[fi], ohlcv_dfs,
                         ms, tp, td, mdd,
                     )
                     fold_metrics = await asyncio.to_thread(
@@ -970,13 +1038,20 @@ async def _run_quant_backtest(qb_id: int):
             wc = winner["combo"]
             ms, tp, td, mdd = wc["min_score"], wc["target_pct"], wc["target_days"], wc["max_drawdown_pct"]
 
+            qb.progress = "Phase 3/3: Pre-computing indicators for OOS..."
+            await db.commit()
+
             fold_oos_list = []
             oos_equity = []
-            for fold in folds:
-                signals, _, diag = await asyncio.to_thread(
-                    _generate_signals_for_range,
-                    ohlcv_dfs, ticker_map,
+            for fi, fold in enumerate(folds):
+                oos_st = await asyncio.to_thread(
+                    _precompute_score_table,
+                    ohlcv_dfs,
                     fold["date_from_oos"], fold["date_to_oos"],
+                )
+                signals, _, diag = await asyncio.to_thread(
+                    _apply_combo_to_score_table,
+                    oos_st, ohlcv_dfs,
                     ms, tp, td, mdd,
                 )
                 fold_metrics = await asyncio.to_thread(
