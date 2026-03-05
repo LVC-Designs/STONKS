@@ -15,7 +15,8 @@ interface ScreenerTableProps {
 
 const columns = [
   { key: "symbol", label: "Symbol" },
-  { key: "name", label: "Name" },
+  { key: "name", label: "Company" },
+  { key: "last_price", label: "Price" },
   { key: "exchange", label: "Exchange" },
   { key: "score", label: "Score" },
   { key: "regime", label: "Regime" },
@@ -73,6 +74,9 @@ export default function ScreenerTable({
               </td>
               <td className="max-w-[200px] truncate px-4 py-3 text-gray-300">
                 {row.name || "—"}
+              </td>
+              <td className="px-4 py-3 text-gray-300 font-medium">
+                {row.last_price ? `$${row.last_price.toFixed(2)}` : "—"}
               </td>
               <td className="px-4 py-3 text-gray-400">{row.exchange || "—"}</td>
               <td className="px-4 py-3">

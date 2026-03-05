@@ -46,6 +46,13 @@ async def get_screener_data(
         .subquery()
     )
 
+    # Subquery: get the latest OHLCV date per ticker
+    latest_ohlcv_sq = (
+        select(OHLCVDaily.ticker_id, func.max(OHLCVDaily.trade_date).label("max_date"))
+        .group_by(OHLCVDaily.ticker_id)
+        .subquery()
+    )
+
     # Main query joining tickers, their latest signal, and latest OHLCV
     query = (
         select(
@@ -61,6 +68,8 @@ async def get_screener_data(
             Signal.volume_score,
             Signal.volatility_score,
             Signal.structure_score,
+            OHLCVDaily.close.label("last_price"),
+            OHLCVDaily.volume.label("last_volume"),
         )
         .join(latest_signal_sq, Ticker.id == latest_signal_sq.c.ticker_id)
         .join(
@@ -68,6 +77,14 @@ async def get_screener_data(
             and_(
                 Signal.ticker_id == Ticker.id,
                 Signal.signal_date == latest_signal_sq.c.max_date,
+            ),
+        )
+        .outerjoin(latest_ohlcv_sq, Ticker.id == latest_ohlcv_sq.c.ticker_id)
+        .outerjoin(
+            OHLCVDaily,
+            and_(
+                OHLCVDaily.ticker_id == Ticker.id,
+                OHLCVDaily.trade_date == latest_ohlcv_sq.c.max_date,
             ),
         )
         .where(Ticker.active == True)
@@ -104,9 +121,11 @@ async def get_screener_data(
     for row in rows:
         items.append(ScreenerRow(
             symbol=row.symbol,
-            name=row.name,
+            name=row.name if row.name and row.name != row.symbol else None,
             exchange=row.exchange,
             exchange_group=row.exchange_group,
+            last_price=float(row.last_price) if row.last_price else None,
+            volume=int(row.last_volume) if row.last_volume else None,
             score=float(row.score) if row.score else None,
             regime=row.regime,
             signal_date=row.signal_date.isoformat() if row.signal_date else None,
