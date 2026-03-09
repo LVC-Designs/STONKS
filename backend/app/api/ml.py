@@ -87,30 +87,38 @@ async def archive_model(model_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/train")
 async def train_model(req: TrainRequest, db: AsyncSession = Depends(get_db)):
     """Launch model training in background."""
+    config = {
+        "date_from": req.date_from or "2024-01-01",
+        "date_to": req.date_to or "2025-12-31",
+        "name": req.name,
+    }
+    if req.epochs:
+        config["epochs"] = req.epochs
+    if req.batch_size:
+        config["batch_size"] = req.batch_size
+    if req.lr:
+        config["lr"] = req.lr
+    if req.hidden_dim:
+        config["hidden_dim"] = req.hidden_dim
+    if req.dropout is not None:
+        config["dropout"] = req.dropout
+
     if req.model_type == "signal_scorer":
         from app.ml.training.signal_trainer import train_signal_scorer
-
-        config = {
-            "date_from": req.date_from or "2024-01-01",
-            "date_to": req.date_to or "2025-12-31",
-            "name": req.name,
-        }
-        if req.epochs:
-            config["epochs"] = req.epochs
-        if req.batch_size:
-            config["batch_size"] = req.batch_size
-        if req.lr:
-            config["lr"] = req.lr
-        if req.hidden_dim:
-            config["hidden_dim"] = req.hidden_dim
-        if req.dropout is not None:
-            config["dropout"] = req.dropout
-
-        # Launch in background
         task = asyncio.create_task(_run_training(train_signal_scorer, config))
-        return {"status": "training_started", "model_type": req.model_type}
+    elif req.model_type == "pattern_recognizer":
+        from app.ml.training.pattern_trainer import train_pattern_recognizer
+        task = asyncio.create_task(_run_training(train_pattern_recognizer, config))
+    elif req.model_type == "price_predictor":
+        from app.ml.training.price_trainer import train_price_predictor
+        task = asyncio.create_task(_run_training(train_price_predictor, config))
+    elif req.model_type == "strategy_selector":
+        from app.ml.training.strategy_trainer import train_strategy_selector
+        task = asyncio.create_task(_run_training(train_strategy_selector, config))
     else:
-        raise HTTPException(501, f"Training for {req.model_type} not yet implemented")
+        raise HTTPException(400, f"Unknown model type: {req.model_type}")
+
+    return {"status": "training_started", "model_type": req.model_type}
 
 
 async def _run_training(train_fn, config: dict):
