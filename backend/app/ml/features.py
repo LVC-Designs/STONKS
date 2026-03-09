@@ -52,47 +52,56 @@ async def extract_signal_training_data(
     - y: (n_samples,) int array — 0=win, 1=loss, 2=timeout
     - feature_names: list of feature column names
     """
-    # Join signals (with outcomes) + computed_indicators
-    query = (
-        select(
-            Signal.ticker_id,
-            Signal.signal_date,
-            Signal.outcome,
-            Signal.trend_score,
-            Signal.momentum_score,
-            Signal.volume_score,
-            Signal.volatility_score,
-            Signal.structure_score,
-            Signal.regime,
-            *[getattr(ComputedIndicator, col) for col in INDICATOR_COLUMNS],
-            OHLCVDaily.close,
-        )
-        .join(
-            ComputedIndicator,
-            and_(
-                ComputedIndicator.ticker_id == Signal.ticker_id,
-                ComputedIndicator.trade_date == Signal.signal_date,
-            ),
-        )
-        .outerjoin(
-            OHLCVDaily,
-            and_(
-                OHLCVDaily.ticker_id == Signal.ticker_id,
-                OHLCVDaily.trade_date == Signal.signal_date,
-            ),
-        )
+    # Step 1: Get signals with outcomes (fast — uses outcome index)
+    sig_query = (
+        select(Signal)
         .where(
             Signal.outcome.in_(["win", "loss", "timeout"]),
             Signal.signal_date >= date_from,
             Signal.signal_date <= date_to,
         )
     )
+    result = await db.execute(sig_query)
+    signals = list(result.scalars().all())
 
-    result = await db.execute(query)
-    rows = result.all()
-
-    if not rows:
+    if not signals:
         return np.array([]), np.array([]), []
+
+    logger.info(f"Found {len(signals)} signals with outcomes")
+
+    # Step 2: Batch-fetch indicators and OHLCV for all (ticker_id, signal_date) pairs
+    # Build lookup dicts to avoid the slow 3-way JOIN
+    ticker_dates = [(s.ticker_id, s.signal_date) for s in signals]
+    unique_ticker_ids = list(set(td[0] for td in ticker_dates))
+    unique_dates = list(set(td[1] for td in ticker_dates))
+
+    # Fetch indicators in chunks to avoid huge IN clause
+    ind_lookup = {}
+    for i in range(0, len(unique_ticker_ids), 50):
+        chunk_ids = unique_ticker_ids[i:i + 50]
+        result = await db.execute(
+            select(ComputedIndicator).where(
+                ComputedIndicator.ticker_id.in_(chunk_ids),
+                ComputedIndicator.trade_date.in_(unique_dates),
+            )
+        )
+        for ci in result.scalars().all():
+            ind_lookup[(ci.ticker_id, ci.trade_date)] = ci
+
+    # Fetch OHLCV closes
+    close_lookup = {}
+    for i in range(0, len(unique_ticker_ids), 50):
+        chunk_ids = unique_ticker_ids[i:i + 50]
+        result = await db.execute(
+            select(OHLCVDaily.ticker_id, OHLCVDaily.trade_date, OHLCVDaily.close).where(
+                OHLCVDaily.ticker_id.in_(chunk_ids),
+                OHLCVDaily.trade_date.in_(unique_dates),
+            )
+        )
+        for row in result.all():
+            close_lookup[(row[0], row[1])] = float(row[2]) if row[2] else 0.0
+
+    logger.info(f"Fetched {len(ind_lookup)} indicator rows, {len(close_lookup)} close prices")
 
     feature_names = INDICATOR_COLUMNS + SUB_SCORE_COLUMNS + [
         "regime_ranging", "regime_trending", "regime_strong_trend",
@@ -102,26 +111,19 @@ async def extract_signal_training_data(
     X_list = []
     y_list = []
 
-    for row in rows:
-        row_dict = row._asdict() if hasattr(row, '_asdict') else dict(zip(
-            ["ticker_id", "signal_date", "outcome"] + SUB_SCORE_COLUMNS + ["regime"] + INDICATOR_COLUMNS + ["close"],
-            row,
-        ))
+    for sig in signals:
+        ci = ind_lookup.get((sig.ticker_id, sig.signal_date))
+        if ci is None:
+            continue  # skip signals without indicator data
 
         # Indicator features
-        ind_vals = []
-        for col in INDICATOR_COLUMNS:
-            val = getattr(row, col, None) if hasattr(row, col) else row_dict.get(col)
-            ind_vals.append(float(val) if val is not None else 0.0)
+        ind_vals = [float(getattr(ci, col, None) or 0) for col in INDICATOR_COLUMNS]
 
         # Sub-scores
-        sub_vals = []
-        for col in SUB_SCORE_COLUMNS:
-            val = getattr(row, col, None) if hasattr(row, col) else row_dict.get(col)
-            sub_vals.append(float(val) if val is not None else 0.0)
+        sub_vals = [float(getattr(sig, col, None) or 0) for col in SUB_SCORE_COLUMNS]
 
         # Regime one-hot
-        regime = getattr(row, "regime", None) or row_dict.get("regime", "trending")
+        regime = sig.regime or "trending"
         regime_vec = [
             1.0 if regime == "ranging" else 0.0,
             1.0 if regime == "trending" else 0.0,
@@ -129,7 +131,7 @@ async def extract_signal_training_data(
         ]
 
         # Price-relative features
-        close = float(getattr(row, "close", None) or row_dict.get("close", 0) or 0)
+        close = close_lookup.get((sig.ticker_id, sig.signal_date), 0.0)
         sma200 = float(ind_vals[INDICATOR_COLUMNS.index("sma_200")] or 0)
         ema20 = float(ind_vals[INDICATOR_COLUMNS.index("ema_20")] or 0)
         close_sma200 = close / sma200 if sma200 > 0 else 1.0
@@ -137,9 +139,7 @@ async def extract_signal_training_data(
 
         features = ind_vals + sub_vals + regime_vec + [close_sma200, close_ema20]
         X_list.append(features)
-
-        outcome = getattr(row, "outcome", None) or row_dict.get("outcome")
-        y_list.append(OUTCOME_MAP.get(outcome, 2))
+        y_list.append(OUTCOME_MAP.get(sig.outcome, 2))
 
     X = np.array(X_list, dtype=np.float32)
     y = np.array(y_list, dtype=np.int64)
