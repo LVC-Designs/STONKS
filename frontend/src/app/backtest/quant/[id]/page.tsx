@@ -15,6 +15,9 @@ import {
   AlertTriangle,
   Trophy,
   Activity,
+  Lightbulb,
+  CheckCircle,
+  ArrowRight,
 } from "lucide-react";
 import type { QuantMetrics, QuantCandidate } from "@/lib/types";
 
@@ -193,6 +196,57 @@ export default function QuantBacktestDetailPage() {
                 OOS Equity Curve
               </h2>
               <EquityChart data={winner.equity_curve} />
+            </div>
+          )}
+
+          {/* AI Insights */}
+          {r.insights && (
+            <div className="mb-6 rounded-lg border border-gray-800 bg-gray-900 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Lightbulb className="h-5 w-5 text-amber-400" />
+                <h2 className="text-lg font-semibold text-white">
+                  What This Means &amp; What to Try Next
+                </h2>
+              </div>
+
+              {/* Summary */}
+              <p className="text-sm text-gray-300 leading-relaxed mb-4">
+                {r.insights.summary}
+              </p>
+
+              {/* Key Takeaways */}
+              {r.insights.takeaways && r.insights.takeaways.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    Key Takeaways
+                  </h3>
+                  <ul className="space-y-1.5">
+                    {r.insights.takeaways.map((t: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                        <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-blue-400" />
+                        <span>{t}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Next Steps */}
+              {r.insights.next_steps && r.insights.next_steps.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    Suggested Next Steps
+                  </h3>
+                  <ul className="space-y-1.5">
+                    {r.insights.next_steps.map((s: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-emerald-300">
+                        <ArrowRight className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-500" />
+                        <span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 

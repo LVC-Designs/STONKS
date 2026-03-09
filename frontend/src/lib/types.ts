@@ -432,6 +432,11 @@ export interface QuantBacktest {
     folds: number;
     candidates_tested: number;
     top_k_evaluated: number;
+    insights?: {
+      summary: string;
+      takeaways: string[];
+      next_steps: string[];
+    };
   } | null;
   diagnostics: Record<string, unknown> | null;
   warnings: string[] | null;
@@ -548,4 +553,74 @@ export interface NewsStatsResponse {
   tickers_with_news: number;
   oldest_article: string | null;
   newest_article: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// ML types
+// ---------------------------------------------------------------------------
+
+export interface MLModel {
+  id: number;
+  model_type: string;
+  version: number;
+  name: string | null;
+  status: string;
+  is_active: boolean;
+  architecture: Record<string, unknown> | null;
+  hyperparameters: Record<string, unknown> | null;
+  train_samples: number | null;
+  val_samples: number | null;
+  test_samples: number | null;
+  train_date_from: string | null;
+  train_date_to: string | null;
+  train_metrics: Record<string, unknown> | null;
+  val_metrics: Record<string, unknown> | null;
+  test_metrics: Record<string, unknown> | null;
+  training_time_seconds: number | null;
+  inference_time_ms: number | null;
+  file_size_mb: number | null;
+  created_at: string | null;
+}
+
+export interface MLTrainingRun {
+  id: number;
+  ml_model_id: number;
+  status: string;
+  progress: string | null;
+  current_epoch: number | null;
+  total_epochs: number | null;
+  epoch_history: Array<Record<string, number>> | null;
+  best_epoch: number | null;
+  best_val_loss: number | null;
+  best_val_metric: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface MLConfig {
+  scoring_mode: string;
+  nn_weight: number;
+  active_models: Record<string, { id: number; version: number }>;
+}
+
+export interface MLDashboard {
+  models: MLModel[];
+  active_models: Record<string, { id: number; version: number }>;
+  recent_training_runs: MLTrainingRun[];
+  scoring_mode: string;
+  nn_weight: number;
+  total_models: number;
+}
+
+export interface TrainRequest {
+  model_type: string;
+  name?: string;
+  date_from?: string;
+  date_to?: string;
+  epochs?: number;
+  batch_size?: number;
+  lr?: number;
+  hidden_dim?: number;
+  dropout?: number;
 }

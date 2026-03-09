@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import screener, ticker_detail, news, settings, jobs, backtest, quant_backtest
+from app.api import screener, ticker_detail, news, settings, jobs, backtest, quant_backtest, ml
 
 api_router = APIRouter()
 
@@ -11,3 +11,4 @@ api_router.include_router(settings.router, prefix="/settings", tags=["settings"]
 api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(quant_backtest.router, prefix="/backtest/quant", tags=["quant-backtest"])
 api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
+api_router.include_router(ml.router, prefix="/ml", tags=["ml"])

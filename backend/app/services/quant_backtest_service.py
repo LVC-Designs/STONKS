@@ -1129,6 +1129,16 @@ async def _run_quant_backtest(qb_id: int):
 
             qb.selected_config = winner["combo"]
             qb.stability_score = final_stability
+            insights = _generate_insights(
+                {
+                    "train": _strip_equity(winner["train_metrics"]),
+                    "val": _strip_equity(winner["val_metrics"]),
+                    "oos": _strip_equity(oos_avg),
+                },
+                winner["combo"],
+                warnings_list,
+                final_stability,
+            )
             qb.results = {
                 "train": _strip_equity(winner["train_metrics"]),
                 "val": _strip_equity(winner["val_metrics"]),
@@ -1136,6 +1146,7 @@ async def _run_quant_backtest(qb_id: int):
                 "folds": len(folds),
                 "candidates_tested": len(combos),
                 "top_k_evaluated": len(val_results),
+                "insights": insights,
             }
             qb.diagnostics = {
                 "tickers": len(tickers),
@@ -1169,6 +1180,228 @@ async def _run_quant_backtest(qb_id: int):
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
+
+def _generate_insights(
+    results: dict,
+    selected_config: dict,
+    warnings: list[str] | None,
+    stability_score: float | None,
+) -> dict:
+    """Generate human-readable insights from quant backtest results.
+
+    Returns dict with 'summary', 'takeaways' (list), and 'next_steps' (list).
+    """
+    train = results.get("train", {})
+    val = results.get("val", {})
+    oos = results.get("oos", {})
+
+    summary_parts = []
+    takeaways = []
+    next_steps = []
+
+    # --- Summary: Interpret train/val/oos trajectory ---
+    train_ret = train.get("total_return", 0)
+    val_ret = val.get("total_return", 0)
+    oos_ret = oos.get("total_return", 0)
+    train_wr = train.get("win_rate", 0)
+    val_wr = val.get("win_rate", 0)
+    oos_wr = oos.get("win_rate", 0)
+
+    # Overfitting detection
+    if train_ret > 5 and val_ret < 0:
+        summary_parts.append(
+            f"Train showed {train_ret:.1f}% return but validation flipped to "
+            f"{val_ret:.1f}% — strong overfitting signal."
+        )
+    elif train_ret > 0 and val_ret > 0 and oos_ret < 0:
+        summary_parts.append(
+            f"Train ({train_ret:.1f}%) and validation ({val_ret:.1f}%) were positive, "
+            f"but OOS turned negative ({oos_ret:.1f}%) — possible regime shift or curve-fitting."
+        )
+    elif train_ret > 0 and val_ret > 0 and oos_ret > 0:
+        if oos_ret >= val_ret * 0.5:
+            summary_parts.append(
+                f"Consistent positive returns across all splits: "
+                f"Train {train_ret:.1f}%, Val {val_ret:.1f}%, OOS {oos_ret:.1f}%. "
+                f"This is a good sign of a real edge."
+            )
+        else:
+            summary_parts.append(
+                f"Returns are positive across splits but degrading: "
+                f"Train {train_ret:.1f}% → Val {val_ret:.1f}% → OOS {oos_ret:.1f}%. "
+                f"Edge exists but weakens out of sample."
+            )
+    elif train_ret <= 0:
+        summary_parts.append(
+            "Strategy was unprofitable even on training data — "
+            "no viable edge found with these parameters."
+        )
+    else:
+        summary_parts.append(
+            f"Mixed results: Train {train_ret:.1f}%, Val {val_ret:.1f}%, OOS {oos_ret:.1f}%."
+        )
+
+    # Stability interpretation
+    if stability_score is not None:
+        if stability_score >= 70:
+            summary_parts.append(
+                f"Stability score of {stability_score:.0f}/100 indicates robust, consistent behavior."
+            )
+        elif stability_score >= 40:
+            summary_parts.append(
+                f"Stability score of {stability_score:.0f}/100 is moderate — some inconsistency across splits."
+            )
+        else:
+            summary_parts.append(
+                f"Low stability score ({stability_score:.0f}/100) — high variance across splits, likely overfit."
+            )
+
+    # --- Takeaways ---
+    # Trade count
+    oos_trades = oos.get("trades", 0)
+    val_trades = val.get("trades", 0)
+    if oos_trades < MIN_TRADES_STAT:
+        takeaways.append(
+            f"Only {oos_trades} OOS trades — too few for statistical confidence. "
+            f"Results could be driven by luck."
+        )
+    elif oos_trades > 500:
+        takeaways.append(
+            f"High trade count ({oos_trades} OOS) suggests loose entry rules. "
+            f"Quality over quantity may improve results."
+        )
+
+    # Win rate
+    if oos_wr > 0:
+        if oos_wr >= 0.6:
+            takeaways.append(
+                f"OOS win rate of {oos_wr * 100:.1f}% is strong — strategy picks winners reliably."
+            )
+        elif oos_wr >= 0.45:
+            takeaways.append(
+                f"OOS win rate of {oos_wr * 100:.1f}% is near coin-flip. "
+                f"Profitability depends heavily on win/loss sizing."
+            )
+        else:
+            takeaways.append(
+                f"OOS win rate of {oos_wr * 100:.1f}% is low — losses outnumber wins."
+            )
+
+    # Sharpe
+    oos_sharpe = oos.get("sharpe", 0)
+    if oos_sharpe > 1.5:
+        takeaways.append(f"OOS Sharpe of {oos_sharpe:.2f} is excellent — strong risk-adjusted returns.")
+    elif oos_sharpe > 0.5:
+        takeaways.append(f"OOS Sharpe of {oos_sharpe:.2f} is decent but not exceptional.")
+    elif oos_sharpe > 0:
+        takeaways.append(
+            f"OOS Sharpe of {oos_sharpe:.2f} is low — returns are volatile relative to their magnitude."
+        )
+    else:
+        takeaways.append(f"Negative OOS Sharpe ({oos_sharpe:.2f}) — risk-adjusted returns are negative.")
+
+    # Profit factor
+    oos_pf = oos.get("profit_factor")
+    if oos_pf is not None:
+        if oos_pf >= 2.0:
+            takeaways.append(f"OOS profit factor of {oos_pf:.2f} is strong — wins substantially outweigh losses.")
+        elif oos_pf >= 1.2:
+            takeaways.append(f"OOS profit factor of {oos_pf:.2f} is marginal — small edge that transaction costs could erode.")
+        elif oos_pf >= 1.0:
+            takeaways.append(f"OOS profit factor near breakeven ({oos_pf:.2f}) — likely unprofitable after costs.")
+        else:
+            takeaways.append(f"OOS profit factor below 1.0 ({oos_pf:.2f}) — strategy loses money.")
+
+    # Max drawdown
+    oos_dd = oos.get("max_drawdown", 0)
+    if oos_dd < -25:
+        takeaways.append(
+            f"Severe OOS drawdown of {oos_dd:.1f}% — painful to hold through in live trading."
+        )
+    elif oos_dd < -15:
+        takeaways.append(f"Moderate OOS drawdown of {oos_dd:.1f}% — manageable but watch position sizing.")
+
+    # Win rate degradation
+    if train_wr > 0 and val_wr > 0:
+        wr_drop = (train_wr - oos_wr) / train_wr * 100
+        if wr_drop > 20:
+            takeaways.append(
+                f"Win rate degraded {wr_drop:.0f}% from train to OOS — "
+                f"strategy is likely picking up noise in training data."
+            )
+
+    # --- Next Steps ---
+    min_score = selected_config.get("min_score", 50)
+    target_pct = selected_config.get("target_pct", 5)
+    target_days = selected_config.get("target_days", 20)
+    max_dd_pct = selected_config.get("max_drawdown_pct", -3)
+
+    if oos_trades > 200 and oos_wr < 0.55:
+        next_steps.append(
+            f"Try raising min_score from {min_score} to {min(min_score + 10, 80)} "
+            f"to filter for higher-conviction setups."
+        )
+
+    if oos.get("avg_hold_days", 0) > 15 and target_days > 15:
+        next_steps.append(
+            f"Average hold time is {oos.get('avg_hold_days', 0):.0f} days. "
+            f"Try shortening target_days to {max(target_days - 5, 5)}-{max(target_days - 10, 10)} "
+            f"for quicker swings."
+        )
+
+    if abs(max_dd_pct) < 3 and oos_wr < 0.5:
+        next_steps.append(
+            f"Tight stop loss ({max_dd_pct}%) may be getting triggered too often. "
+            f"Try widening to {max_dd_pct - 2}% to give trades more room."
+        )
+    elif abs(max_dd_pct) > 5 and oos_dd < -20:
+        next_steps.append(
+            f"Wide stop loss ({max_dd_pct}%) allowing large drawdowns. "
+            f"Try tightening to {max_dd_pct + 2}% to cut losses faster."
+        )
+
+    if target_pct > 5 and oos_wr < 0.4:
+        next_steps.append(
+            f"Target of {target_pct}% may be too ambitious (low win rate). "
+            f"Try a smaller target like {max(target_pct - 2, 2)}% for more frequent wins."
+        )
+
+    if train_ret > 0 and val_ret < 0:
+        next_steps.append(
+            "Strong overfitting detected. Consider: (1) reducing parameter grid size, "
+            "(2) using walk-forward mode with more folds, or (3) adding transaction costs."
+        )
+
+    if oos_pf is not None and oos_pf >= 1.2 and oos_wr >= 0.5 and oos_ret > 0:
+        next_steps.append(
+            "This looks promising. Next: re-run with transaction costs (0.1-0.2% per trade) "
+            "included to check if the edge survives after slippage and commissions."
+        )
+
+    if stability_score is not None and stability_score < 40:
+        next_steps.append(
+            "Low stability suggests the strategy works in some market conditions but not others. "
+            "Try a longer date range or add regime-based filtering."
+        )
+
+    if not next_steps:
+        if oos_ret > 0:
+            next_steps.append(
+                "Results are modestly positive. Try narrowing the parameter grid around the "
+                "winning config and re-running for finer optimization."
+            )
+        else:
+            next_steps.append(
+                "Consider fundamentally different parameter ranges or adding new signal "
+                "components (multi-timeframe, sentiment) to improve edge detection."
+            )
+
+    return {
+        "summary": " ".join(summary_parts),
+        "takeaways": takeaways,
+        "next_steps": next_steps,
+    }
+
 
 def _parse_date(val) -> date:
     if isinstance(val, date):

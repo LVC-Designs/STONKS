@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, FlaskConical, Newspaper, Search, Settings, Shield, TrendingUp } from "lucide-react";
+import { Brain, FlaskConical, Newspaper, Search, Settings, Shield, TrendingUp } from "lucide-react";
 
 const navItems = [
   { href: "/screener", label: "Screener", icon: Search },
   { href: "/backtest", label: "Backtests", icon: FlaskConical },
   { href: "/backtest/quant", label: "Quant Backtests", icon: Shield },
+  { href: "/ml", label: "ML Models", icon: Brain },
   { href: "/news", label: "News", icon: Newspaper },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
