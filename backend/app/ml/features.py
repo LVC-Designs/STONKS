@@ -69,37 +69,35 @@ async def extract_signal_training_data(
 
     logger.info(f"Found {len(signals)} signals with outcomes")
 
-    # Step 2: Batch-fetch indicators and OHLCV for all (ticker_id, signal_date) pairs
-    # Build lookup dicts to avoid the slow 3-way JOIN
-    ticker_dates = [(s.ticker_id, s.signal_date) for s in signals]
-    unique_ticker_ids = list(set(td[0] for td in ticker_dates))
-    unique_dates = list(set(td[1] for td in ticker_dates))
+    # Step 2: Fetch indicators and OHLCV per-ticker (only for that ticker's signal dates)
+    from collections import defaultdict
+    ticker_signal_dates = defaultdict(list)
+    for s in signals:
+        ticker_signal_dates[s.ticker_id].append(s.signal_date)
 
-    # Fetch indicators in chunks to avoid huge IN clause
     ind_lookup = {}
-    for i in range(0, len(unique_ticker_ids), 50):
-        chunk_ids = unique_ticker_ids[i:i + 50]
+    close_lookup = {}
+
+    for tid, dates in ticker_signal_dates.items():
+        # Fetch only the indicator rows for this ticker's signal dates
         result = await db.execute(
             select(ComputedIndicator).where(
-                ComputedIndicator.ticker_id.in_(chunk_ids),
-                ComputedIndicator.trade_date.in_(unique_dates),
+                ComputedIndicator.ticker_id == tid,
+                ComputedIndicator.trade_date.in_(dates),
             )
         )
         for ci in result.scalars().all():
             ind_lookup[(ci.ticker_id, ci.trade_date)] = ci
 
-    # Fetch OHLCV closes
-    close_lookup = {}
-    for i in range(0, len(unique_ticker_ids), 50):
-        chunk_ids = unique_ticker_ids[i:i + 50]
+        # Fetch OHLCV closes for this ticker's signal dates
         result = await db.execute(
-            select(OHLCVDaily.ticker_id, OHLCVDaily.trade_date, OHLCVDaily.close).where(
-                OHLCVDaily.ticker_id.in_(chunk_ids),
-                OHLCVDaily.trade_date.in_(unique_dates),
+            select(OHLCVDaily.trade_date, OHLCVDaily.close).where(
+                OHLCVDaily.ticker_id == tid,
+                OHLCVDaily.trade_date.in_(dates),
             )
         )
         for row in result.all():
-            close_lookup[(row[0], row[1])] = float(row[2]) if row[2] else 0.0
+            close_lookup[(tid, row[0])] = float(row[1]) if row[1] else 0.0
 
     logger.info(f"Fetched {len(ind_lookup)} indicator rows, {len(close_lookup)} close prices")
 
